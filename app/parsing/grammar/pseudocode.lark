@@ -1,12 +1,197 @@
-// Mínima para arrancar. AJUSTA con tu gramática real.
-// Acepta un bloque begin ... end con cero o más asignaciones "x <- y"
-?start: program
-program: "begin" stmt* "end"
+// ============================================================================
+// GRAMÁTICA LARK PARA ANALIZADOR DE COMPLEJIDADES
+// Basada en sintaxis tipo Pascal con extensiones para objetos y grafos
+// ============================================================================
 
-?stmt: assign
-assign: NAME "<-" (NUMBER | NAME)       -> assign_stmt
+// ============================================================================
+// PROGRAMA PRINCIPAL
+// ============================================================================
 
-%import common.CNAME -> NAME
-%import common.INT   -> NUMBER
+start: program
+
+program: class_definition* algorithm
+
+// ============================================================================
+// DEFINICIÓN DE CLASES (antes del algoritmo principal)
+// ============================================================================
+
+class_definition: CNAME "{" attribute_list "}"
+
+attribute_list: CNAME+
+
+// ============================================================================
+// ALGORITMO PRINCIPAL Y SUBRUTINAS
+// ============================================================================
+
+algorithm: subroutine_definition* main_algorithm
+
+main_algorithm: "begin" local_declarations? statement* "end"
+
+subroutine_definition: CNAME "(" parameter_list? ")" "begin" local_declarations? statement* "end"
+
+// ============================================================================
+// DECLARACIONES LOCALES (vectores al inicio del algoritmo)
+// ============================================================================
+
+local_declarations: local_declaration+
+
+local_declaration: CNAME "[" expression "]"
+                 | CNAME CNAME
+
+// ============================================================================
+// PARÁMETROS DE SUBRUTINAS
+// ============================================================================
+
+parameter_list: parameter ("," parameter)*
+
+parameter: array_parameter
+         | object_parameter
+         | simple_parameter
+
+array_parameter: CNAME ("[" expression? "]")+ (".." "[" expression "]")?
+
+object_parameter: CNAME CNAME
+
+simple_parameter: CNAME
+
+// ============================================================================
+// SENTENCIAS
+// ============================================================================
+
+statement: assignment ";"?
+         | for_loop
+         | while_loop
+         | repeat_loop
+         | if_statement
+         | call_statement ";"?
+         | return_statement ";"?
+         | comment
+
+// ----------------------------------------------------------------------------
+// ASIGNACIÓN
+// ----------------------------------------------------------------------------
+
+assignment: variable ASSIGN expression
+
+// ----------------------------------------------------------------------------
+// CICLOS
+// ----------------------------------------------------------------------------
+
+for_loop: "for" CNAME ASSIGN expression "to" expression "do" block
+
+while_loop: "while" "(" condition ")" "do" block
+
+repeat_loop: "repeat" statement+ "until" "(" condition ")"
+
+// ----------------------------------------------------------------------------
+// CONDICIONALES
+// ----------------------------------------------------------------------------
+
+if_statement: "if" "(" condition ")" "then" block ("else" block)?
+
+// ----------------------------------------------------------------------------
+// LLAMADAS A SUBRUTINAS
+// ----------------------------------------------------------------------------
+
+call_statement: "call" CNAME "(" argument_list? ")"
+
+argument_list: expression ("," expression)*
+
+// ----------------------------------------------------------------------------
+// RETURN
+// ----------------------------------------------------------------------------
+
+return_statement: "return" expression
+
+// ============================================================================
+// BLOQUES DE CÓDIGO
+// ============================================================================
+
+block: "begin" statement* "end"
+     | statement
+
+// ============================================================================
+// VARIABLES Y ACCESO A DATOS
+// ============================================================================
+
+variable: CNAME "." CNAME ("[" expression "]")+
+        | CNAME "." CNAME
+        | CNAME ("[" expression "]")+
+        | CNAME "[" range "]"
+        | CNAME
+
+range: expression ".." expression
+
+// ============================================================================
+// EXPRESIONES
+// ============================================================================
+
+expression: logical_or
+
+logical_or: logical_and ("or" logical_and)*
+
+logical_and: logical_not ("and" logical_not)*
+
+logical_not: "not" logical_not
+           | comparison
+
+comparison: arithmetic (comp_op arithmetic)*
+
+comp_op: "<" | ">" | "<=" | ">=" | "=" | "!=" | "≤" | "≥" | "≠"
+
+arithmetic: term ((PLUS|MINUS) term)*
+
+term: factor ((STAR|SLASH|"mod"|"div") factor)*
+
+factor: (PLUS | MINUS) factor
+      | power
+
+power: atom (CIRCUMFLEX atom)*
+
+atom: NUMBER
+    | BOOLEAN
+    | NULL
+    | variable
+    | function_call
+    | "(" expression ")"
+    | ceiling
+    | floor
+    | length
+
+length: "length" "(" variable ")"
+
+ceiling: "┌" expression "┐"
+
+floor: "└" expression "┘"
+
+function_call: CNAME "(" argument_list? ")"
+
+condition: expression
+
+comment: COMMENT
+
+// ============================================================================
+// TERMINALES
+// ============================================================================
+
+ASSIGN: "🡨" | ":="
+
+BOOLEAN: "T" | "F" | "true" | "false"
+
+NULL: "NULL" | "null"
+
+NUMBER: /\d+(\.\d+)?/
+
+CNAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+
+COMMENT: /►[^\n]*/
+
+// Operadores aritméticos (solo símbolos)
+PLUS: "+"
+MINUS: "-"
+STAR: "*"
+SLASH: "/"
+CIRCUMFLEX: "^"
+
 %import common.WS
 %ignore WS
