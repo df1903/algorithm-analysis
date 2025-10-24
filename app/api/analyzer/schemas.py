@@ -19,3 +19,16 @@ class AnalyzerResponse(BaseModel):
     bounds: Bound
     reasoning: List[Step]
     artifacts: Optional[Dict[str, Any]] = None
+
+
+class AstRequest(BaseModel):
+    """Petición para obtener el AST a partir de código en texto."""
+
+    text: str
+
+
+class AstResponse(BaseModel):
+    """Respuesta con el AST serializado a JSON."""
+
+    ast: Dict[str, Any]
+    pretty: Optional[str] = None

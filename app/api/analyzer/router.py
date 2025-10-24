@@ -14,6 +14,10 @@ from app.api.analyzer.schemas import (
 )
 from app.parsing.parser import parse_pseudocode
 from app.analysis.estimator import estimate_complexity
+from app.api.analyzer.schemas import AstRequest, AstResponse
+from app.parsing.parser import PseudocodeParser
+from app.parsing.transformer import PseudocodeTransformer
+from app.parsing.serializer import ast_to_dict
 
 router = APIRouter()
 
@@ -61,3 +65,26 @@ def test() -> dict[str, str]:
         dict[str, str]: Mensaje de confirmación del servicio.
     """
     return {"message": "API de análisis funcionando correctamente"}
+
+
+@router.post("/ast", response_model=AstResponse)
+def build_ast(req: AstRequest) -> AstResponse:
+    """
+    Genera el AST (objetos) a partir del pseudocódigo recibido y lo serializa a JSON.
+
+    - Parsea el código con Lark.
+    - Transforma el árbol en objetos Python (AST propio).
+    - Serializa el AST a un dict JSON-serializable.
+    """
+    try:
+        parser = PseudocodeParser()
+        lark_tree = parser.parse(req.text)
+
+        transformer = PseudocodeTransformer()
+        ast_obj = transformer.transform(lark_tree)
+
+        ast_json = ast_to_dict(ast_obj)
+        pretty = lark_tree.pretty()
+        return AstResponse(ast=ast_json, pretty=pretty)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Error construyendo AST: {exc}") from exc
