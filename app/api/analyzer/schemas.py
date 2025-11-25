@@ -1,5 +1,13 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from pydantic import Field
+
+
+from app.analysis.schemas_extraction import (
+    RecursiveExtraction,
+    IterativeExtraction,
+)
+
 
 class AnalyzerRequest(BaseModel):
     text: str
@@ -33,3 +41,15 @@ class AstResponse(BaseModel):
     ast: Dict[str, Any]
     pretty: Optional[str] = None
     classification: dict
+    analysis: RecursiveExtraction | IterativeExtraction
+    resolution: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Resolución de complejidad (Fase 2: O, Ω, Θ)"
+    )
+    error: Optional[str] = None
+    
+    
+class NaturalLanguageRequest(BaseModel):
+    description: str = Field(
+        description="Descripción del algoritmo en lenguaje natural",     
+    )

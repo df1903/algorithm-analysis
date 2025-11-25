@@ -6,93 +6,98 @@ el estado del servicio.
 """
 
 from fastapi import APIRouter, HTTPException
-from app.api.analyzer.schemas import (
-    AnalyzerRequest,
-    AnalyzerResponse,
-    Bound,
-    Step,
-)
-from app.parsing.parser import parse_pseudocode
-from app.analysis.estimator import estimate_complexity
-from app.api.analyzer.schemas import AstRequest, AstResponse
-from app.parsing.parser import PseudocodeParser
-from app.parsing.transformer import PseudocodeTransformer
-from app.parsing.serializer import ast_to_dict
-from app.analysis.classifier import AlgorithmClassifier
+from app.core.analysis_pipeline import analyze_pseudocode_internal
+from app.api.analyzer.schemas import AstRequest, AstResponse, NaturalLanguageRequest
+from app.analysis.agents.translator_agent import TranslatorAgent
+
 
 router = APIRouter()
 
-
-@router.post("/analyze", response_model=AnalyzerResponse)
-def analyze(req: AnalyzerRequest) -> AnalyzerResponse:
-    """
-    Analiza el pseudocódigo recibido y estima su complejidad temporal.
-
-    Args:
-        req (AnalyzerRequest): Objeto con el texto del pseudocódigo y la
-            opción de generar diagrama.
-
-    Raises:
-        HTTPException: Si ocurre un error de sintaxis durante el análisis.
-
-    Returns:
-        AnalyzerResponse: Resultado con límites, pasos de razonamiento
-        y artefactos generados.
-    """
-    try:
-        ast = parse_pseudocode(req.text)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Error de sintaxis: {exc}",
-        ) from exc
-
-    result = estimate_complexity(ast, with_diagram=req.want_diagram)
-
-    return AnalyzerResponse(
-        normalized_pseudocode=req.text,
-        bounds=Bound(**result["bounds"]),
-        reasoning=[Step(description=s) for s in result["steps"]],
-        artifacts=result.get("artifacts", {}),
-    )
-
-
-@router.get("/")
-def test() -> dict[str, str]:
-    """
-    Verifica que la API del analizador esté funcionando correctamente.
-
-    Returns:
-        dict[str, str]: Mensaje de confirmación del servicio.
-    """
-    return {"message": "API de análisis funcionando correctamente"}
 
 
 @router.post("/ast", response_model=AstResponse)
 def build_ast(req: AstRequest) -> AstResponse:
     """
-    Genera el AST (objetos) a partir del pseudocódigo recibido y lo serializa a JSON.
-
-    - Parsea el código con Lark.
-    - Transforma el árbol en objetos Python (AST propio).
-    - Serializa el AST a un dict JSON-serializable.
+    Genera el AST, analiza (Fase 1) y resuelve complejidades (Fase 2) con caché
     """
     try:
-        parser = PseudocodeParser()
-        lark_tree = parser.parse(req.text)
-
-        transformer = PseudocodeTransformer()
-        ast_obj = transformer.transform(lark_tree)
-
-        classifier = AlgorithmClassifier(ast_obj)
-        classification = classifier.classify_all()
-
-        ast_json = ast_to_dict(ast_obj)
-        pretty = lark_tree.pretty()
-        return AstResponse(
-            ast=ast_json, 
-            pretty=pretty,
-            classification=classification
+        # Usar función compartida
+        result = analyze_pseudocode_internal(
+            pseudocode=req.text,
+            natural_description=None  
         )
+        
+        #Respuesta al llamado
+        return AstResponse(
+            ast=result["ast"],
+            pretty=result["pretty"],
+            classification=result["classification"],
+            analysis=result["analysis"],
+            resolution=result["resolution"]
+        )
+        
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Error construyendo AST: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error construyendo AST y analizando: {exc}"
+        ) from exc
+
+        
+@router.post("/natural-to-pseudocode")
+def natural_to_pseudocode(req: NaturalLanguageRequest) -> dict:
+    """
+    Traduce lenguaje natural a pseudocódigo Y lo analiza completamente.
+    
+    Args:
+        req: Objeto con la descripción en lenguaje natural
+        
+    Returns:
+        dict con pseudocode, analysis, resolution, y metadatos de traducción
+        
+    Raises:
+        HTTPException: Si no se puede generar pseudocódigo válido o analizarlo
+    """
+    try:
+        # PASO 1: Traducir descripción natural a pseudocódigo
+
+        translator = TranslatorAgent()
+        translation_result = translator.translate(req.description)
+        
+        if not translation_result["success"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": translation_result["error"],
+                    "last_attempt": translation_result.get("last_attempt"),
+                    "last_error": translation_result.get("last_error")
+                }
+            )
+        
+        pseudocode = translation_result["pseudocode"]
+        
+        
+        # PASO 2: Analizar el pseudocódigo generado
+        analysis_result = analyze_pseudocode_internal(
+            pseudocode=pseudocode,
+            natural_description=req.description
+        )
+        
+        # PASO 3: Devolver resultados
+        return {
+            "pseudocode": pseudocode,
+            "validated": translation_result["validated"],
+            "attempts": translation_result["attempts"],
+            "confidence": translation_result["confidence"],
+            "analysis": analysis_result["analysis"],
+            "resolution": analysis_result["resolution"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error en traducción o análisis: {str(e)}"
+        )
