@@ -46,6 +46,10 @@ class AstResponse(BaseModel):
         default=None,
         description="Resolución de complejidad (Fase 2: O, Ω, Θ)"
     )
+    mermaid: Optional[str] = Field(
+        default=None,
+        description="Diagrama de flujo en formato Mermaid"
+    )
     error: Optional[str] = None
     
     

@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException
 from app.core.analysis_pipeline import analyze_pseudocode_internal
 from app.api.analyzer.schemas import AstRequest, AstResponse, NaturalLanguageRequest
 from app.analysis.agents.translator_agent import TranslatorAgent
+from app.storage.supabase_client import supabase_client
+
 
 
 router = APIRouter()
@@ -33,7 +35,9 @@ def build_ast(req: AstRequest) -> AstResponse:
             pretty=result["pretty"],
             classification=result["classification"],
             analysis=result["analysis"],
-            resolution=result["resolution"]
+            resolution=result["resolution"],
+            mermaid=result.get("mermaid")
+            
         )
         
     except Exception as exc:
@@ -89,7 +93,8 @@ def natural_to_pseudocode(req: NaturalLanguageRequest) -> dict:
             "attempts": translation_result["attempts"],
             "confidence": translation_result["confidence"],
             "analysis": analysis_result["analysis"],
-            "resolution": analysis_result["resolution"]
+            "resolution": analysis_result["resolution"],
+            "mermaid": analysis_result.get("mermaid")
         }
         
     except HTTPException:
@@ -100,4 +105,29 @@ def natural_to_pseudocode(req: NaturalLanguageRequest) -> dict:
         raise HTTPException(
             status_code=500, 
             detail=f"Error en traducción o análisis: {str(e)}"
+        )
+        
+@router.get("/algorithms")
+def get_all_algorithms():
+    """
+    Obtiene TODOS los algoritmos guardados en caché con toda su información.
+    
+    Returns:
+        Lista de todos los algoritmos con análisis, complejidades y diagramas
+    """
+    try:
+        response = supabase_client.client.table("algorithms_cache")\
+            .select("*")\
+            .order("created_at", desc=True)\
+            .execute()
+        
+        return {
+            "total": len(response.data),
+            "algorithms": response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error obteniendo algoritmos: {str(e)}"
         )

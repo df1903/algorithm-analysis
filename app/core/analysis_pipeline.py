@@ -7,6 +7,7 @@ import json
 import traceback
 
 from typing import Optional, Dict, Any
+from app.visualization.mermaid_generator import MermaidGenerator
 from app.parsing.parser import PseudocodeParser
 from app.parsing.transformer import PseudocodeTransformer
 from app.parsing.serializer import ast_to_dict
@@ -20,20 +21,62 @@ from app.storage.cache_utils import (
     reconstruct_analysis
 )
 
+def generate_mermaid_from_pseudocode(pseudocode: str, ast_obj=None) -> str:
+    """
+    Genera diagrama Mermaid desde pseudocódigo o AST
+    
+    Args:
+        pseudocode: Pseudocódigo a visualizar
+        ast_obj: AST ya parseado
+        
+    Returns:
+        str: Código Mermaid completo
+    """
+    try:
+        # Si no tenemos AST, parsear
+        if ast_obj is None:
+            parser = PseudocodeParser()
+            tree = parser.parse(pseudocode)
+            transformer = PseudocodeTransformer()
+            ast_obj = transformer.transform(tree)
+        
+        # Determinar qué visualizar
+        if ast_obj.algorithm.subroutines:
+            # Usar la última subrutina (la principal)
+            if len(ast_obj.algorithm.subroutines) >= 2:
+                target = ast_obj.algorithm.subroutines[-1]
+            else:
+                target = ast_obj.algorithm.subroutines[0]
+        else:
+            # Si no hay subrutinas, usar el main
+            target = ast_obj.algorithm.main
+        
+        # Generar Mermaid
+        generator = MermaidGenerator()
+        mermaid_code = generator.generate(target)
+        
+        return mermaid_code
+        
+    except Exception as e:
+        print(f" Error generando Mermaid: {e}")
+        import traceback
+        traceback.print_exc()
+        # Si falla, retornar un diagrama básico
+        return "flowchart TD\n    ERROR[Error generando diagrama]"
 
 def analyze_pseudocode_internal(
     pseudocode: str,
     natural_description: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Análisis completo de pseudocódigo con caché.
+    Análisis completo de pseudocódigo con caché y generación de Mermaid.
     
     Args:
         pseudocode: Texto del pseudocódigo a analizar
         natural_description: Descripción en lenguaje natural (opcional)
         
     Returns:
-        Dict con: ast, pretty, classification, analysis, resolution
+        Dict con: ast, pretty, classification, analysis, resolution, mermaid
         
     Raises:
         Exception: Si hay error en parsing o análisis
@@ -50,7 +93,7 @@ def analyze_pseudocode_internal(
             .execute()
         
         if cache_response.data and len(cache_response.data) > 0:
-            # ENCONTRADO EN CACHÉ
+            #  ENCONTRADO EN CACHÉ
             cached = cache_response.data[0]
             
             # Incrementar contador
@@ -58,6 +101,24 @@ def analyze_pseudocode_internal(
                 .update({"times_requested": cached["times_requested"] + 1})\
                 .eq("id", cached["id"])\
                 .execute()
+            # VERIFICAR SI TIENE MERMAID
+            mermaid_code = None
+            
+            if cached.get("mermaid_diagram") is None:
+                
+                # Generar Mermaid desde el pseudocódigo guardado
+                mermaid_code = generate_mermaid_from_pseudocode(cached["pseudocode"])
+                
+                # Actualizar BD con el Mermaid
+                try:
+                    supabase_client.client.table("algorithms_cache")\
+                        .update({"mermaid_diagram": mermaid_code})\
+                        .eq("id", cached["id"])\
+                        .execute()
+                except Exception as update_error:
+                    print(f" Error actualizando Mermaid en caché: {update_error}")
+            else:
+                mermaid_code = cached["mermaid_diagram"]
             
             # Reconstruir análisis (Fase 1)
             analysis_result = reconstruct_analysis(cached)
@@ -70,15 +131,14 @@ def analyze_pseudocode_internal(
                 "pretty": "[Desde caché]",
                 "classification": {"from_cache": True},
                 "analysis": analysis_result,
-                "resolution": resolution_result
+                "resolution": resolution_result,
+                "mermaid": mermaid_code 
             }
     
     except Exception as cache_error:
-        print(f"Error en caché (continuando sin caché): {cache_error}")
+        print(f" Error en caché (continuando sin caché): {cache_error}")
     
-    # PASO 2: NO ESTÁ EN CACHÉ → ANALIZAR
-    
-
+    # PASO 2: NO ESTÁ EN CACHÉ 
     
     # Parser y clasificación
     parser = PseudocodeParser()
@@ -95,6 +155,7 @@ def analyze_pseudocode_internal(
     
     analysis_result = None
     resolution_result = None
+    mermaid_code = None
     
     if ast_json["algorithm"]["subroutines"]:
         
@@ -108,10 +169,8 @@ def analyze_pseudocode_internal(
         # Decidir qué función analizar
         if recursive_idx is not None:
             use_idx = recursive_idx
-        
         elif len(ast_json["algorithm"]["subroutines"]) >= 2:
             use_idx = len(ast_json["algorithm"]["subroutines"]) - 1
-        
         else:
             use_idx = 0
         
@@ -128,7 +187,7 @@ def analyze_pseudocode_internal(
             subroutine_name=first_subroutine["name"]
         )
         
-        # PASO 3: FASE 2 - RESOLUCIÓN DE COMPLEJIDADES
+        # FASE 2: RESOLUCIÓN DE COMPLEJIDADES
         
         if not isinstance(analysis_result, dict) or "error" not in analysis_result:
             try:
@@ -140,21 +199,31 @@ def analyze_pseudocode_internal(
                 if resolution_result.has_different_cases:
                     if resolution_result.best_case:
                         best_theta = resolution_result.best_case.resolution.Theta or resolution_result.best_case.resolution.O
+                        print(f"  Best case: {best_theta}")
                     if resolution_result.worst_case:
                         worst_theta = resolution_result.worst_case.resolution.Theta or resolution_result.worst_case.resolution.O
+                        print(f"  Worst case: {worst_theta}")
                     if resolution_result.average_case:
                         avg_theta = resolution_result.average_case.resolution.Theta or resolution_result.average_case.resolution.O
+                        print(f"  Average case: {avg_theta}")
                 else:
                     if resolution_result.unified_case:
                         unified_theta = resolution_result.unified_case.resolution.Theta or resolution_result.unified_case.resolution.O
-                
+                        print(f"  Unified case: {unified_theta}")
                 
             except Exception as resolver_error:
                 print(f"\nError en Fase 2: {resolver_error}")
                 traceback.print_exc()
                 resolution_result = None
         
-        # PASO 4: GUARDAR EN CACHÉ (CON natural_description)
+        # GENERAR MERMAID
+        
+        try:
+            mermaid_code = generate_mermaid_from_pseudocode(pseudocode, ast_obj)
+        except Exception as mermaid_error:
+            mermaid_code = "flowchart TD\n    ERROR[Error generando diagrama]"
+        
+        # GUARDAR EN CACHÉ
         
         if not isinstance(analysis_result, dict) or "error" not in analysis_result:
             try:
@@ -164,13 +233,17 @@ def analyze_pseudocode_internal(
                     analysis_result, 
                     pseudocode,
                     resolution_result,
-                    natural_description=natural_description  # ← CLAVE
+                    natural_description=natural_description
                 )
+                
+                # Agregar Mermaid al cache_data
+                cache_data["mermaid_diagram"] = mermaid_code  # ← NUEVO
                 
                 # Insertar en Supabase
                 supabase_client.client.table("algorithms_cache")\
                     .insert(cache_data)\
                     .execute()
+                
                 
             except Exception as save_error:
                 print(f"\nError guardando en caché: {save_error}")
@@ -181,7 +254,8 @@ def analyze_pseudocode_internal(
         "pretty": pretty,
         "classification": classification,
         "analysis": analysis_result,
-        "resolution": resolution_result.model_dump() if resolution_result else None
+        "resolution": resolution_result.model_dump() if resolution_result else None,
+        "mermaid": mermaid_code 
     }
 
 
